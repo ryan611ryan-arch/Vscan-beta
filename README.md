@@ -1,6 +1,6 @@
 # VScan Pro
 
-![VScan Pro Logo](https://raw.githubusercontent.com/ryan611ryan-arch/Vscan-beta/main/image.jpg)
+![VScan Pro Logo](https://github.com/ryan611ryan-arch/Vscan-beta/blob/main/image.jpg)
 
 Advanced Port and Vulnerability Scanner using Nmap
 
