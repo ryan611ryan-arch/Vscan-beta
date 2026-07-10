@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-VScan Pro - Full Nmap Detail Scanner
-Version: 9.2 - Optimized & Fixed
+VScan 
+Version: 1.0.0
 """
 
 import nmap
@@ -32,9 +32,8 @@ def banner():
 {Fore.MAGENTA}    ╚████╔╝ ███████║╚██████╗██║  ██║██║ ╚████║
 {Fore.MAGENTA}     ╚═══╝  ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝
 {Fore.RESET}
-{Fore.CYAN}          VScan Pro - Full Nmap Detail Scanner
-{Fore.YELLOW}          Optimized for Speed & Accuracy
-{Fore.RED}          For Authorized Testing Only
+{Fore.CYAN}              VScan - Version : 1.0.0
+{Fore.RED}               For Authorized Testing Only
     """)
 
 def get_ip(host):
