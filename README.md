@@ -1,5 +1,7 @@
 # VScan Pro
 
+![VScan Pro Logo](https://raw.githubusercontent.com/ryan611ryan-arch/Vscan-beta/main/image.jpg)
+
 Advanced Port and Vulnerability Scanner using Nmap
 
 ## Features
@@ -21,6 +23,6 @@ Advanced Port and Vulnerability Scanner using Nmap
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/vscan.git
-cd vscan
+git clone [https://github.com/ryan611ryan-arch/Vscan-beta.git](https://github.com/ryan611ryan-arch/Vscan-beta.git)
+cd Vscan-beta
 pip install -r requirements.txt
