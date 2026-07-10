@@ -12,7 +12,6 @@ Advanced Port and Vulnerability Scanner using Nmap
 - Vulnerability assessment for common services
 - Nmap script integration
 - Professional formatted output
-- No firewall detection scripts
 
 ## Requirements
 
@@ -26,3 +25,4 @@ Advanced Port and Vulnerability Scanner using Nmap
 git clone [https://github.com/ryan611ryan-arch/Vscan-beta.git](https://github.com/ryan611ryan-arch/Vscan-beta.git)
 cd Vscan-beta
 pip install -r requirements.txt
+sudo python3 Vscan.py
