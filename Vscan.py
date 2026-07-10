@@ -3,7 +3,7 @@
 
 """
 VScan Pro - Full Nmap Detail Scanner
-Version: 9.1 - بدون كشف الجدران
+Version: 9.2 - Optimized & Fixed
 """
 
 import nmap
@@ -45,54 +45,58 @@ def get_ip(host):
 
 def get_host_info(target):
     """جلب معلومات الاستضافة والـ PTR"""
-    info = {}
+    info = {'hostname': target, 'org': 'N/A', 'country': 'N/A'}
     try:
         info['hostname'] = socket.gethostbyaddr(target)[0]
     except:
-        info['hostname'] = target
+        pass
     
     try:
-        # WHOIS lookup سريع
-        result = subprocess.run(['whois', target], capture_output=True, text=True, timeout=5)
+        # استخدام timeout أقصر وتجنب التعليق
+        result = subprocess.run(['whois', target], capture_output=True, text=True, timeout=3)
         whois_data = result.stdout
-        # استخراج المعلومات المهمة
-        org_match = re.search(r'OrgName:\s*(.+)', whois_data)
+        org_match = re.search(r'(OrgName|organization|descr):\s*(.+)', whois_data, re.IGNORECASE)
         if org_match:
-            info['org'] = org_match.group(1).strip()
-        country_match = re.search(r'Country:\s*(.+)', whois_data)
+            info['org'] = org_match.group(2).strip()
+        country_match = re.search(r'(Country):\s*(.+)', whois_data, re.IGNORECASE)
         if country_match:
-            info['country'] = country_match.group(1).strip()
+            info['country'] = country_match.group(2).strip()
     except:
         pass
     
     return info
 
 def fast_port_discovery(target):
-    """اكتشاف سريع للبورتات المفتوحة - بدون كشف جدران"""
+    """اكتشاف سريع للبورتات المفتوحة - محسن للسرعة والدقة"""
     print(f"\n{Fore.CYAN}[*] Phase 1: Fast port discovery on {Fore.WHITE}{target}{Fore.CYAN} ...")
     
     try:
         nm = nmap.PortScanner()
-        # حذف --open عشان نعرف كل البورتات
-        # حذف أي سكريبتات تكتشف الجدران
-        nm.scan(target, arguments='-sS -T5 --max-retries 1 --max-rtt-timeout 300ms -p-')
+        # تحسين المعاملات:
+        # -Pn: لتجاوز فحص التواجد (ping) إذا كان محظوراً
+        # -n: لتعطيل DNS resolution لتسريع العملية
+        # --min-rate 5000: لضمان سرعة إرسال الحزم
+        # -p-: فحص كل المنافذ 1-65535
+        # --open: فقط المنافذ المفتوحة فعلياً لتقليل الضجيج في المرحلة الثانية
+        args = '-Pn -n -sS -T4 --min-rate 5000 --max-retries 1 -p- --open'
+        
+        nm.scan(target, arguments=args)
         
         open_ports = []
-        if target in nm.all_hosts():
-            for proto in nm[target].all_protocols():
-                for port in nm[target][proto]:
-                    state = nm[target][proto][port]['state']
-                    # نقبل أي بورت مفتوح أو قد يكون مفتوح
-                    if state in ['open', 'filtered', 'open|filtered']:
+        for host in nm.all_hosts():
+            for proto in nm[host].all_protocols():
+                lport = nm[host][proto].keys()
+                for port in lport:
+                    if nm[host][proto][port]['state'] == 'open':
                         open_ports.append(port)
         
-        return sorted(open_ports)
+        return sorted(list(set(open_ports)))
     except Exception as e:
         print(f"{Fore.RED}[!] Fast scan error: {e}")
         return []
 
 def detailed_service_scan(target, ports):
-    """فحص تفصيلي للخدمات - بدون سكريبتات كشف الجدران"""
+    """فحص تفصيلي للخدمات مع تحسين استخراج الإصدارات"""
     if not ports:
         return []
     
@@ -102,57 +106,50 @@ def detailed_service_scan(target, ports):
     
     try:
         nm = nmap.PortScanner()
-        
-        # إعدادات بدون سكريبتات كشف الجدران
-        # حذف: firewall-bypass, ipidseq, tcp-seq
+        # تحسين معاملات الفحص التفصيلي:
+        # -sV: فحص الإصدار
+        # -sC: تشغيل سكريبتات Nmap الافتراضية
+        # --version-intensity 5: توازن بين السرعة والدقة (بدل 9 التي تأخذ وقتاً طويلاً)
+        # --script=vulners: إضافة سكريبت vulners للحصول على CVEs مباشرة من Nmap
         arguments = (
-            f'-sV -sC -A -O --version-all --version-intensity 9 '
-            f'--script=banner,http-title,ssl-cert,ssl-enum-ciphers,'
-            f'ssh-hostkey,mysql-info,rdp-enum-encryption '
-            f'-p {port_str} -T4 --min-rate 1000'
+            f'-Pn -n -sV -sC --version-intensity 5 '
+            f'--script=banner,http-title,vulners '
+            f'-p {port_str} -T4'
         )
-        
-        print(f"{Fore.YELLOW}[*] Running: nmap {arguments}")
         
         nm.scan(target, arguments=arguments)
         
         results = []
         
-        if target in nm.all_hosts():
-            host_data = nm[target]
+        for host in nm.all_hosts():
+            host_data = nm[host]
             
-            # معلومات OS
-            os_info = {}
+            os_info = {'name': 'Unknown', 'accuracy': '0'}
             if 'osmatch' in host_data and host_data['osmatch']:
                 os_info = {
                     'name': host_data['osmatch'][0].get('name', 'Unknown'),
-                    'accuracy': host_data['osmatch'][0].get('accuracy', '0'),
-                    'osclass': host_data['osmatch'][0].get('osclass', [])
+                    'accuracy': host_data['osmatch'][0].get('accuracy', '0')
                 }
             
             for proto in host_data.all_protocols():
-                if proto == 'tcp':
-                    for port in host_data[proto]:
-                        info = host_data[proto][port]
-                        
-                        if info['state'] in ['open', 'filtered', 'open|filtered']:
-                            port_data = {
-                                'port': port,
-                                'state': info.get('state', 'open'),
-                                'service': info.get('name', 'unknown'),
-                                'product': info.get('product', ''),
-                                'version': info.get('version', ''),
-                                'extrainfo': info.get('extrainfo', ''),
-                                'cpe': info.get('cpe', ''),
-                                'conf': info.get('conf', ''),
-                                'method': info.get('method', ''),
-                                'script': info.get('script', {}),
-                                'os': os_info,
-                                'hostname': host_data.get('hostnames', []),
-                                'mac': host_data.get('addresses', {}).get('mac', 'N/A'),
-                                'vendor': host_data.get('vendor', {})
-                            }
-                            results.append(port_data)
+                for port in host_data[proto]:
+                    info = host_data[proto][port]
+                    
+                    port_data = {
+                        'port': port,
+                        'state': info.get('state', 'open'),
+                        'service': info.get('name', 'unknown'),
+                        'product': info.get('product', ''),
+                        'version': info.get('version', ''),
+                        'extrainfo': info.get('extrainfo', ''),
+                        'cpe': info.get('cpe', ''),
+                        'conf': info.get('conf', ''),
+                        'method': info.get('method', ''),
+                        'script': info.get('script', {}),
+                        'os': os_info,
+                        'mac': host_data.get('addresses', {}).get('mac', 'N/A')
+                    }
+                    results.append(port_data)
         
         return results
         
@@ -161,159 +158,70 @@ def detailed_service_scan(target, ports):
         return []
 
 def check_vuln_enhanced(service, product, version, port, script_results=None):
-    """فحص شامل للثغرات مع قاعدة بيانات موسعة"""
+    """فحص شامل للثغرات مع قاعدة بيانات محدثة وتدقيق CVEs"""
     vulns = []
     level = "SAFE"
     color = Fore.GREEN
     
     service_lower = service.lower()
     product_lower = product.lower()
-    version_str = str(version)
+    version_str = str(version).lower()
     
-    # فحص نتائج سكريبتات Nmap (بدون سكريبتات الجدران)
-    if script_results:
-        # Vulners script results
-        if 'vulners' in script_results:
-            vuln_data = script_results['vulners']
-            if isinstance(vuln_data, str):
-                # استخراج CVEs من نتيجة vulners
-                cves = re.findall(r'CVE-\d{4}-\d+', vuln_data)
-                for cve in cves:
-                    vulns.append(f"Vulners: {cve} found")
+    # 1. استخراج الثغرات من سكريبت vulners الخاص بـ Nmap (الأكثر دقة)
+    if script_results and 'vulners' in script_results:
+        vuln_text = script_results['vulners']
+        # البحث عن CVEs ودرجات الخطورة
+        cve_matches = re.findall(r'(CVE-\d{4}-\d+)\s+(\d+\.\d)', vuln_text)
+        if cve_matches:
+            for cve, score in cve_matches[:5]: # نأخذ أول 5 فقط للترتيب
+                vulns.append(f"{cve} (Score: {score})")
+                score_val = float(score)
+                if score_val >= 9.0:
                     level = "CRITICAL"
                     color = Fore.RED
-        
-        # SSL/TLS vulnerabilities
-        if 'ssl-enum-ciphers' in script_results:
-            ssl_output = str(script_results['ssl-enum-ciphers'])
-            if 'TLSv1.0' in ssl_output or 'SSLv3' in ssl_output or 'SSLv2' in ssl_output:
-                vulns.append("Weak SSL/TLS - Deprecated protocols enabled")
-                if level != "CRITICAL":
+                elif score_val >= 7.0 and level != "CRITICAL":
                     level = "HIGH"
                     color = Fore.RED
-        
-        # Banner grab vulnerabilities
-        if 'banner' in script_results:
-            banner = str(script_results['banner']).lower()
-            if 'windows xp' in banner or 'windows 2000' in banner:
-                vulns.append("Legacy OS detected in banner")
-                level = "CRITICAL"
-                color = Fore.RED
-    
-    # SSH Vulnerabilities
-    if 'ssh' in service_lower:
-        ver_match = re.search(r'(\d+\.\d+)', version_str)
-        if ver_match:
-            ver = float(ver_match.group(1))
-            if ver < 7.0:
-                vulns.append(f"CVE-2016-6210 - User enumeration (OpenSSH {version_str})")
-                level = "HIGH"
-                color = Fore.RED
-            elif ver < 8.0:
-                vulns.append(f"CVE-2018-15473 - User enumeration (OpenSSH {version_str})")
-                level = "HIGH"
-                color = Fore.RED
-            elif ver < 8.8:
-                vulns.append(f"CVE-2021-41617 - Privilege escalation (OpenSSH {version_str})")
-                level = "MEDIUM"
-                color = Fore.YELLOW
-    
-    # Apache Vulnerabilities
-    if 'apache' in product_lower or ('http' in service_lower and 'apache' in product_lower):
-        if '2.4.49' in version_str or '2.4.50' in version_str:
-            vulns.append("CVE-2021-42013 - Path traversal & RCE (CRITICAL)")
-            level = "CRITICAL"
-            color = Fore.RED
-        elif '2.4.41' in version_str or '2.4.46' in version_str:
-            vulns.append("CVE-2021-44790 - Buffer overflow")
-            level = "HIGH"
-            color = Fore.RED
-        elif '2.2' in version_str:
-            vulns.append("CVE-2017-9798 - Optionsbleed (HIGH)")
-            level = "HIGH"
-            color = Fore.RED
-    
-    # Nginx Vulnerabilities
-    if 'nginx' in product_lower:
-        ver_match = re.search(r'(\d+\.\d+\.\d+)', version_str)
-        if ver_match:
-            ver = ver_match.group(1)
-            if ver.startswith('1.0') or ver.startswith('1.1') or ver.startswith('1.2'):
-                vulns.append("CVE-2013-2028 - Stack overflow")
-                level = "HIGH"
-                color = Fore.RED
-            elif ver.startswith('1.6') or ver.startswith('1.7'):
-                vulns.append("CVE-2016-1247 - Privilege escalation")
-                level = "HIGH"
-                color = Fore.RED
-    
-    # MySQL/MariaDB
-    if 'mysql' in service_lower:
-        if '5.0' in version_str or '5.1' in version_str or '5.5' in version_str:
-            vulns.append("CVE-2012-2122 - Authentication bypass")
-            level = "HIGH"
-            color = Fore.RED
-        elif '5.6' in version_str:
-            vulns.append("CVE-2016-6662 - Remote code execution")
-            level = "CRITICAL"
-            color = Fore.RED
-    
-    # FTP
-    if 'ftp' in service_lower:
-        if 'vsftpd' in product_lower and '2.3.4' in version_str:
-            vulns.append("CVE-2011-2523 - Backdoor (CRITICAL)")
-            level = "CRITICAL"
-            color = Fore.RED
-        if '21' in str(port):
-            vulns.append("FTP - Unencrypted protocol, use SFTP/FTPS")
-            if level == "SAFE":
-                level = "MEDIUM"
-                color = Fore.YELLOW
-    
-    # Telnet
-    if 'telnet' in service_lower:
-        vulns.append("Telnet - Unencrypted, credentials in plain text (CRITICAL)")
-        level = "CRITICAL"
-        color = Fore.RED
-    
-    # RDP
-    if 'rdp' in service_lower or 'ms-wbt-server' in service_lower:
-        if version_str and any(v in version_str for v in ['6.0', '5.', '7.0']):
-            vulns.append("CVE-2019-0708 - BlueKeep RCE (CRITICAL)")
-            level = "CRITICAL"
-            color = Fore.RED
-        vulns.append("RDP - Ensure NLA is enabled")
-        if level == "SAFE":
-            level = "MEDIUM"
-            color = Fore.YELLOW
-    
-    # SMB
-    if 'smb' in service_lower or 'microsoft-ds' in service_lower:
-        vulns.append("CVE-2017-0144 - EternalBlue (check MS17-010)")
-        level = "HIGH"
-        color = Fore.RED
-    
-    # Redis
-    if 'redis' in service_lower:
-        vulns.append("Redis - Check for AUTH and bind configuration")
-        if level == "SAFE":
-            level = "MEDIUM"
-            color = Fore.YELLOW
-    
-    # Docker
-    if 'docker' in service_lower:
-        vulns.append("Docker API exposed - Potential container escape")
-        level = "CRITICAL"
-        color = Fore.RED
-    
-    # Unknown service
-    if service_lower in ['unknown', ''] and not vulns:
-        vulns.append("Unknown service - Manual review recommended")
-        level = "INFO"
-        color = Fore.CYAN
-    
+                elif score_val >= 4.0 and level not in ["CRITICAL", "HIGH"]:
+                    level = "MEDIUM"
+                    color = Fore.YELLOW
+
     if not vulns:
-        vulns.append("No known vulnerabilities detected")
+        # SSH
+        if 'ssh' in service_lower:
+            if any(v in version_str for v in ['2.3', '3.0', '4.0', '5.0', '6.0']):
+                vulns.append(f"Legacy OpenSSH {version_str} - Multiple CVEs")
+                level = "HIGH"; color = Fore.RED
+        
+        # HTTP / Apache / Nginx
+        elif 'http' in service_lower or 'apache' in product_lower or 'nginx' in product_lower:
+            if '2.4.49' in version_str or '2.4.50' in version_str:
+                vulns.append("CVE-2021-41773 / CVE-2021-42013 Path Traversal")
+                level = "CRITICAL"; color = Fore.RED
+            elif '1.14.0' in version_str:
+                vulns.append("Nginx 1.14.0 - Potential vulnerabilities")
+                level = "MEDIUM"; color = Fore.YELLOW
+        
+        # SMB
+        elif 'microsoft-ds' in service_lower or port == 445:
+            vulns.append("SMB Service - Check for EternalBlue (MS17-010)")
+            level = "HIGH"; color = Fore.RED
+            
+        # FTP
+        elif 'ftp' in service_lower:
+            if '2.3.4' in version_str and 'vsftpd' in product_lower:
+                vulns.append("vsftpd 2.3.4 Backdoor (CVE-2011-2523)")
+                level = "CRITICAL"; color = Fore.RED
+            else:
+                vulns.append("FTP - Plaintext protocol (Use SFTP)")
+                level = "MEDIUM"; color = Fore.YELLOW
+
+    if not vulns:
+        if service_lower in ['unknown', '']:
+            vulns.append("Unknown service - Manual check required")
+            level = "INFO"; color = Fore.CYAN
+        else:
+            vulns.append("No common vulnerabilities detected")
     
     return vulns, level, color
 
@@ -327,9 +235,9 @@ def show_results(host, ip, open_ports, host_info):
     print(f"{Fore.CYAN}║  IP: {Fore.WHITE}{ip}")
     if host_info.get('hostname') and host_info['hostname'] != host:
         print(f"{Fore.CYAN}║  Hostname: {Fore.WHITE}{host_info['hostname']}")
-    if host_info.get('org'):
+    if host_info.get('org') and host_info['org'] != 'N/A':
         print(f"{Fore.CYAN}║  Organization: {Fore.WHITE}{host_info['org']}")
-    if host_info.get('country'):
+    if host_info.get('country') and host_info['country'] != 'N/A':
         print(f"{Fore.CYAN}║  Country: {Fore.WHITE}{host_info['country']}")
     print(f"{Fore.CYAN}╚══════════════════════════════════════════════════════════════════╝{Fore.RESET}")
     
@@ -363,10 +271,8 @@ def show_results(host, ip, open_ports, host_info):
         print(f"{Fore.CYAN}  │  Version:     {Fore.WHITE}{port['version'] if port['version'] else 'N/A'}")
         print(f"{Fore.CYAN}  │  Extra Info:  {Fore.WHITE}{port['extrainfo'] if port['extrainfo'] else 'N/A'}")
         print(f"{Fore.CYAN}  │  CPE:         {Fore.WHITE}{port['cpe'] if port['cpe'] else 'N/A'}")
-        print(f"{Fore.CYAN}  │  Confidence:  {Fore.WHITE}{port['conf'] if port.get('conf') else 'N/A'}")
-        print(f"{Fore.CYAN}  │  Method:      {Fore.WHITE}{port['method'] if port.get('method') else 'N/A'}")
         
-        if port.get('os') and port['os'].get('name'):
+        if port.get('os') and port['os'].get('name') != 'Unknown':
             print(f"{Fore.CYAN}  ├─ Operating System")
             print(f"{Fore.CYAN}  │  OS Name:     {Fore.WHITE}{port['os']['name']}")
             print(f"{Fore.CYAN}  │  Accuracy:    {Fore.WHITE}{port['os']['accuracy']}%")
@@ -377,18 +283,17 @@ def show_results(host, ip, open_ports, host_info):
         if script_results:
             print(f"{Fore.CYAN}  ├─ Nmap Script Results")
             for script_name, script_output in script_results.items():
-                output_str = str(script_output)
-                if len(output_str) > 200:
-                    output_str = output_str[:200] + "..."
-                print(f"{Fore.CYAN}  │  {Fore.YELLOW}• {script_name}:")
-                for line in output_str.split('\n')[:5]:
-                    print(f"{Fore.CYAN}  │    {Fore.WHITE}{line.strip()}")
+                if script_name == 'vulners': continue # نعرضه في قسم الثغرات
+                output_str = str(script_output).replace('\n', ' ')
+                if len(output_str) > 100:
+                    output_str = output_str[:100] + "..."
+                print(f"{Fore.CYAN}  │  {Fore.YELLOW}• {script_name}: {Fore.WHITE}{output_str}")
         
         print(f"{Fore.CYAN}  └─ Vulnerability Assessment")
         for vuln in vulns:
-            if "No known" in vuln:
+            if "No common" in vuln or "No known" in vuln:
                 print(f"{Fore.CYAN}     {Fore.GREEN}✓ {vuln}")
-            elif "INFO" in level:
+            elif level == "INFO":
                 print(f"{Fore.CYAN}     {Fore.CYAN}ℹ {vuln}")
             else:
                 print(f"{Fore.CYAN}     {color}⚠ {vuln}")
@@ -415,8 +320,11 @@ def show_results(host, ip, open_ports, host_info):
 def main():
     banner()
     
-    target = input(f"\n{Fore.WHITE}Enter target (IP or domain): {Fore.RESET}").strip()
-    
+    try:
+        target = input(f"\n{Fore.WHITE}Enter target (IP or domain): {Fore.RESET}").strip()
+    except EOFError:
+        return
+
     if not target:
         print(f"\n{Fore.RED}[!] No target provided")
         sys.exit(1)
@@ -435,18 +343,15 @@ def main():
     
     start_time = time.time()
     
-    # المرحلة 1: اكتشاف سريع
-    open_ports = fast_port_discovery(target)
+    open_ports = fast_port_discovery(ip)
     
     if not open_ports:
-        print(f"{Fore.YELLOW}[!] No open ports found")
         show_results(target, ip, [], host_info)
         sys.exit(0)
     
     print(f"{Fore.GREEN}[+] Found {len(open_ports)} open ports: {open_ports}")
     
-    # المرحلة 2: فحص تفصيلي
-    detailed_results = detailed_service_scan(target, open_ports)
+    detailed_results = detailed_service_scan(ip, open_ports)
     
     elapsed = time.time() - start_time
     
