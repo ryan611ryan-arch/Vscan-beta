@@ -1,4 +1,4 @@
-# VScan Pro
+# VScan-bate
 
 ![VScan Pro Logo](https://github.com/ryan611ryan-arch/Vscan-beta/blob/main/image.jpg)
 
