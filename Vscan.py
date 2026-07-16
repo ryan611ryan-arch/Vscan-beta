@@ -71,12 +71,6 @@ def fast_port_discovery(target):
     
     try:
         nm = nmap.PortScanner()
-        # تحسين المعاملات:
-        # -Pn: لتجاوز فحص التواجد (ping) إذا كان محظوراً
-        # -n: لتعطيل DNS resolution لتسريع العملية
-        # --min-rate 5000: لضمان سرعة إرسال الحزم
-        # -p-: فحص كل المنافذ 1-65535
-        # --open: فقط المنافذ المفتوحة فعلياً لتقليل الضجيج في المرحلة الثانية
         args = '-Pn -n -sS -T4 --min-rate 5000 --max-retries 1 -p- --open'
         
         nm.scan(target, arguments=args)
@@ -105,11 +99,7 @@ def detailed_service_scan(target, ports):
     
     try:
         nm = nmap.PortScanner()
-        # تحسين معاملات الفحص التفصيلي:
-        # -sV: فحص الإصدار
-        # -sC: تشغيل سكريبتات Nmap الافتراضية
-        # --version-intensity 5: توازن بين السرعة والدقة (بدل 9 التي تأخذ وقتاً طويلاً)
-        # --script=vulners: إضافة سكريبت vulners للحصول على CVEs مباشرة من Nmap
+  
         arguments = (
             f'-Pn -n -sV -sC --version-intensity 5 '
             f'--script=banner,http-title,vulners '
@@ -166,13 +156,11 @@ def check_vuln_enhanced(service, product, version, port, script_results=None):
     product_lower = product.lower()
     version_str = str(version).lower()
     
-    # 1. استخراج الثغرات من سكريبت vulners الخاص بـ Nmap (الأكثر دقة)
     if script_results and 'vulners' in script_results:
         vuln_text = script_results['vulners']
-        # البحث عن CVEs ودرجات الخطورة
         cve_matches = re.findall(r'(CVE-\d{4}-\d+)\s+(\d+\.\d)', vuln_text)
         if cve_matches:
-            for cve, score in cve_matches[:5]: # نأخذ أول 5 فقط للترتيب
+            for cve, score in cve_matches[:5]: 
                 vulns.append(f"{cve} (Score: {score})")
                 score_val = float(score)
                 if score_val >= 9.0:
