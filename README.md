@@ -22,7 +22,7 @@ Advanced Port and Vulnerability Scanner using Nmap
 ## Installation
 
 ```bash
-git clone [https://github.com/ryan611ryan-arch/Vscan-beta.git](https://github.com/ryan611ryan-arch/Vscan-beta.git)
+git clone https://github.com/ryan611ryan-arch/Vscan-beta/
 cd Vscan-beta
 pip install -r requirements.txt
 sudo python3 Vscan.py
